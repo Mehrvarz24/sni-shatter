@@ -189,12 +189,58 @@ class HttpTamperStrategy(Strategy):
         return len(out)
 
 
+class FakePacketStrategy(Strategy):
+    """Tier 2 — inject a fake ClientHello before sending the real one.
+
+    The fake packet is put on the wire with a low IP TTL (dies at the first
+    hop, so the real server never sees it) or an out-of-window sequence number
+    (the server stack discards it). A DPI middlebox near the client sees the
+    fake ClientHello first, matches it, and when the real fragmented handshake
+    follows it has already committed its verdict on the flow.
+
+    Requires raw-socket privileges; without them it degrades to Tier 1
+    behaviour (just send the real payload through the normal socket).
+    """
+    name = "fakepkt"
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        from . import fakepkt
+        self.fp = fakepkt
+
+    def send(self, sock, data: bytes) -> int:
+        if not data or data[0] != 0x16:
+            return super().send(sock, data)
+        host = self.cfg.get("_target_host", "")
+        injected = False
+        try:
+            dst_ip = socket.gethostbyname(host) if host else sock.getpeername()[0]
+            dst_port = sock.getpeername()[1]
+            src_port = sock.getsockname()[1]
+            rep = self.fp.inject_fake_hello(dst_ip, dst_port, src_port, data,
+                                            self.cfg)
+            injected = rep.get("ok", False)
+            if not injected and self.cfg.get("_log"):
+                self.cfg["_log"]("[fakepkt] injection unavailable: %s — "
+                                 "falling back to Tier 1" % rep.get("error"))
+        except OSError as exc:
+            if self.cfg.get("_log"):
+                self.cfg["_log"]("[fakepkt] %s" % exc)
+        self.cfg["_fakepkt_injected"] = injected
+        # Then the real ClientHello, fragmented by Tier 1 logic.
+        inner = CombinedStrategy(self.cfg)
+        if self.cfg.get("fake_inner_strategy") == "split":
+            inner = SplitStrategy(self.cfg)
+        return inner.send(sock, data)
+
+
 STRATEGIES = {
     "split": SplitStrategy,
     "segment": SegmentStrategy,
     "tlsrec": TlsRecordStrategy,
     "combined": CombinedStrategy,
     "httptamper": HttpTamperStrategy,
+    "fakepkt": FakePacketStrategy,
     "none": Strategy,
 }
 

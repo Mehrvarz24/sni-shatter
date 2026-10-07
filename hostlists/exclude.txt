@@ -1,0 +1,5 @@
+# sni-shatter exclude list — never touch these, even if they appear in the
+# hostlist. Use for hosts where desync breaks the connection (e.g. servers
+# with strict anti-replay / TLS-fingerprint checks).
+# Examples (empty by default):
+# *.bank.example

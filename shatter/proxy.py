@@ -11,6 +11,7 @@ import threading
 
 from .desync import build_strategy
 from .clienthello import find_sni_offsets
+from .hostlist import HostList
 
 BUFSIZE = 65536
 
@@ -53,6 +54,18 @@ class Relay:
         self.cfg = cfg
         self.stats = stats if stats is not None else {}
         self.log = cfg.get("_log") or (lambda *a: None)
+        self.hostlist = HostList(cfg)
+
+    def _send_first(self, up, hostname, data):
+        """Apply the strategy to the first outbound payload, honouring the
+        hostlist and passing the target host to the strategy (Tier 2)."""
+        if not self.hostlist.allowed(hostname):
+            self._bump("hostlist_bypass", 1)
+            up.sendall(data)
+            return
+        self.cfg["_target_host"] = hostname
+        strat = build_strategy(self.cfg)
+        strat.send(up, data)
 
     def _bump(self, key, n=1):
         self.stats[key] = self.stats.get(key, 0) + n
@@ -132,6 +145,7 @@ class Relay:
             return None
         # plain HTTP: head is the payload; hand it to the strategy then relay
         self._http_pending = head
+        self.cfg["_last_host"] = host
         return (host, 80)
 
     def _handle_socks5(self, client):
@@ -173,9 +187,8 @@ class Relay:
         except OSError:
             client.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             return
-        strat = build_strategy(self.cfg)
         try:
-            strat.send(up, pending)
+            self._send_first(up, target[0], pending)
             self._bump("first_payload", len(pending))
             t = threading.Thread(target=self.pipe, args=(up, client), daemon=True)
             t.start()
@@ -198,9 +211,8 @@ class Relay:
         self._relay_established(client, up)
 
     def _relay_plain_http(self, client, up, pending):
-        strat = build_strategy(self.cfg)
         try:
-            strat.send(up, pending)
+            self._send_first(up, self.cfg.get("_last_host", ""), pending)
             self._bump("first_payload", len(pending))
             t = threading.Thread(target=self.pipe, args=(up, client), daemon=True)
             t.start()
@@ -217,9 +229,9 @@ class Relay:
         try:
             first = peek_payload(client)
             if first:
-                strat = build_strategy(self.cfg)
                 data = client.recv(len(first))
-                strat.send(up, data)
+                hostname = hostname_of(first) if first[:1] == b"\x16" else ""
+                self._send_first(up, hostname, data)
                 self._bump("first_payload", len(data))
                 if first[:1] == b"\x16":
                     h = hostname_of(first)

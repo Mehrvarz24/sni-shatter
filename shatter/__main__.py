@@ -136,7 +136,11 @@ def main(argv=None):
                                  description="Portable DPI-desync proxy (sni-shatter)")
     ap.add_argument("-c", "--config", help="path to config.json")
     ap.add_argument("--port", type=int, help="listen port (default 40443)")
-    ap.add_argument("--strategy", help="split|segment|tlsrec|combined|httptamper|none")
+    ap.add_argument("--strategy", help="split|segment|tlsrec|combined|httptamper|fakepkt|none")
+    ap.add_argument("--tier2", action="store_true",
+                    help="enable Tier 2 fake-packet injection (needs root/Admin)")
+    ap.add_argument("--hostlist", help="path to include-list (only these hosts get desync)")
+    ap.add_argument("--hostlist-exclude", help="path to exclude-list (never desync these)")
     ap.add_argument("--connect-ip", help="raw relay mode: forward every connection to this "
                     "IP (e.g. a Cloudflare edge IP) — point a VLESS/VMess client at 127.0.0.1:port")
     ap.add_argument("--connect-port", type=int, default=443, help="relay target port (default 443)")
@@ -150,6 +154,27 @@ def main(argv=None):
         cfg["listen_port"] = args.port
     if args.strategy:
         cfg["strategy"] = args.strategy
+    if args.tier2:
+        cfg["tier2"] = True
+    if args.hostlist:
+        cfg["hostlist"] = args.hostlist
+    if args.hostlist_exclude:
+        cfg["hostlist_exclude"] = args.hostlist_exclude
+
+    # Tier 2: when enabled, swap the configured Tier-1 strategy for the
+    # fake-packet one (which internally still uses a Tier-1 inner strategy).
+    if cfg.get("tier2") or cfg.get("strategy") == "fakepkt":
+        if not cfg.get("strategy") == "fakepkt":
+            cfg["strategy_tier2"] = cfg.get("strategy_tier2") or cfg["strategy"]
+        cfg["strategy"] = "fakepkt"
+        from .fakepkt import raw_sockets_available
+        if not raw_sockets_available():
+            print("WARNING: Tier 2 needs raw-socket privileges "
+                  "(run as root / Administrator); falling back to Tier 1.")
+        else:
+            print("Tier 2 enabled: fake-packet injection active "
+                  "(ttl=%s, mode=%s)" % (cfg.get("fake_ttl", 3),
+                                         cfg.get("fake_seq_mode", "lowttl")))
     if args.connect_ip:
         cfg["connect_ip"] = args.connect_ip
         cfg["connect_port"] = args.connect_port

@@ -6,5 +6,15 @@
   "segment_size": 2,
   "tlsrec_size": 5,
   "split_delay": 0.0,
-  "block_quic_hint": true
+  "block_quic_hint": true,
+
+  "hostlist": "hostlists/iran-blocked.txt",
+  "hostlist_exclude": "hostlists/exclude.txt",
+
+  "tier2": false,
+  "strategy_tier2": "fakepkt",
+  "fake_ttl": 3,
+  "fake_count": 1,
+  "fake_seq_mode": "lowttl",
+  "fake_inner_strategy": "combined"
 }

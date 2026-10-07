@@ -27,6 +27,7 @@ ClientHello is placed on the wire, never **what** it contains:
 | `tlsrec` | re-frames it into several small, valid TLS records |
 | `combined` | TLS-record framing **plus** a TCP cut inside the first record |
 | `httptamper` | case-tampers `Host:` in plain HTTP requests |
+| `fakepkt` | **Tier 2** — injects a fake ClientHello via a raw socket before the real, fragmented handshake |
 | `none` | pass-through (baseline for testing) |
 
 A censoring middlebox that does not reassemble fragmented data sees no
@@ -56,6 +57,52 @@ Then point your browser (or any application) at:
 - **HTTP proxy:** `127.0.0.1:40443`
 
 Windows users: see [windows/run.bat](windows/run.bat).
+
+## Tier 2 — fake-packet injection (optional, needs privileges)
+
+Tier 1 segmentation alone does not beat every filter: censors that track
+connection state may still drop IP-blocked sites (YouTube's video edge, for
+example). Tier 2 adds **fake-packet injection**: a decoy ClientHello is
+injected on the wire through a raw socket, with either
+
+- a **low IP TTL** (`fake_ttl`, default 3) — the packet dies at the first hop,
+  so the real server never sees it, but the censor near the client does; or
+- an **out-of-window TCP sequence number** (`fake_seq_mode: "outofwindow"`) —
+  the server stack drops it as a duplicate, the censor does not.
+
+The real ClientHello then follows through the normal socket, fragmented by a
+Tier-1 inner strategy (`fake_inner_strategy`: `combined` or `split`). The
+middlebox has already committed its verdict on the flow and lets it pass.
+
+Requires raw sockets: `sudo` / `CAP_NET_RAW` on Linux, Administrator on
+Windows. **Without privileges it degrades gracefully** to plain Tier 1.
+
+```bash
+# enable via config ("tier2": true) or on the command line:
+sudo python3 -m shatter --tier2
+
+# or pick the strategy directly:
+sudo python3 -m shatter --strategy fakepkt
+```
+
+Config keys: `tier2` (bool), `strategy_tier2`, `fake_ttl`, `fake_count`,
+`fake_seq_mode` (`lowttl` | `outofwindow`), `fake_inner_strategy`.
+
+## Hostlist — apply desync only where it is needed
+
+By default sni-shatter desyncs every connection. With a hostlist only the
+listed hosts are treated; everything else is relayed untouched. An exclude
+list protects hosts where desync breaks the connection. Entries may be plain
+domains (which also match subdomains), `*.wildcards`, IPs and CIDR ranges.
+
+```json
+"hostlist": "hostlists/iran-blocked.txt",
+"hostlist_exclude": "hostlists/exclude.txt"
+```
+
+A starter list of commonly-filtered domains ships in
+[hostlists/iran-blocked.txt](hostlists/iran-blocked.txt). CLI equivalents:
+`--hostlist PATH`, `--hostlist-exclude PATH`.
 
 ## Two ways to run
 
