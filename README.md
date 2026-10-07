@@ -57,6 +57,46 @@ Then point your browser (or any application) at:
 
 Windows users: see [windows/run.bat](windows/run.bat).
 
+## Two ways to run
+
+### A) Local proxy mode (default)
+
+Point a browser or app at `127.0.0.1:40443` (HTTP CONNECT or SOCKS5). sni-shatter
+desyncs the ClientHello of each connection you send it.
+
+### B) Relay mode — the v2rayN / tunnel workflow
+
+If you already use a client like **v2rayN** with a Cloudflare-fronted config
+(VLESS+WS/XHTTP), you can put sni-shatter *in front of* the CDN endpoint: give it
+the edge IP, and make v2rayN believe that IP is the server.
+
+```bash
+python -m shatter --connect-ip 172.66.158.77 --connect-port 443 --strategy combined
+# or with config.relay.json:
+python -m shatter -c config.relay.json
+```
+
+Then, in v2rayN, change **only the address field** of your config from the CDN
+IP / domain to `127.0.0.1` and the port to `40443`. Everything else (UUID, path,
+host, SNI, TLS) stays as-is. v2rayN emits its raw VLESS bytes to sni-shatter,
+which forwards them to the real edge with the first payload desynchronized.
+
+Live log lines look like:
+
+```
+sni-shatter listening on 127.0.0.1:40443  [relay -> 172.66.158.77:443]  strategy=combined
+[conn] 127.0.0.1:52104 -> raw 312B first payload (strategy=combined)
+[done] 127.0.0.1:52104 closed
+```
+
+This is the same idea as the "change the IP to 127.0.0.1:40443" trick: the tool
+is transparent to the client protocol, it only rewrites the transport.
+
+> Note: VLESS/VMess payloads are already encrypted, so the SNI inside them is
+> not visible to DPI. Relay mode is most useful when your client sends a **TLS
+> ClientHello** (e.g. a TLS-based transport, a plain tunnel, or when the CDN
+> handshake itself is what is being filtered). Verify with `--check` first.
+
 ## Configuration
 
 `config.json` next to the package (or `-c path`):

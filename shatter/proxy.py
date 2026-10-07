@@ -52,6 +52,7 @@ class Relay:
     def __init__(self, cfg, stats=None):
         self.cfg = cfg
         self.stats = stats if stats is not None else {}
+        self.log = cfg.get("_log") or (lambda *a: None)
 
     def _bump(self, key, n=1):
         self.stats[key] = self.stats.get(key, 0) + n
@@ -74,8 +75,19 @@ class Relay:
                     pass
 
     def handle(self, client: socket.socket, target=None):
-        """target: (host, port). When None, parse it from the first bytes."""
+        """target: (host, port). When None, parse it from the first bytes.
+
+        Relay mode: if self.cfg has connect_ip, every connection is forwarded
+        there (raw byte relay with desync on the first payload) regardless of
+        what the client asked for — this is the v2rayN-style upstream mode:
+        point a VLESS/VMess client at 127.0.0.1:40443 and set connect_ip to
+        your CDN endpoint.
+        """
         try:
+            if self.cfg.get("connect_ip"):
+                return self._relay_raw(client,
+                                       (self.cfg["connect_ip"],
+                                        int(self.cfg.get("connect_port", 443))))
             if target is None:
                 client.settimeout(10)
                 first = client.recv(1, socket.MSG_PEEK)
@@ -172,6 +184,19 @@ class Relay:
         finally:
             up.close()
 
+    def _relay_raw(self, client, target):
+        """Pure relay: connect to `target` and pipe bytes both ways, applying
+        the desync strategy to the first client payload. Used when the client
+        speaks its own protocol (VLESS/VMess/Trojan/tunnel) and only the
+        transport must be disguised."""
+        try:
+            up = socket.create_connection(target, timeout=10)
+        except OSError:
+            self._bump("relay_connect_fail")
+            return
+        self._bump("relay_connections")
+        self._relay_established(client, up)
+
     def _relay_plain_http(self, client, up, pending):
         strat = build_strategy(self.cfg)
         try:
@@ -186,7 +211,8 @@ class Relay:
 
     def _relay_established(self, client, up):
         """Shared relay for protocols whose target is already resolved
-        (SOCKS5 and HTTP-CONNECT share this path)."""
+        (SOCKS5, HTTP-CONNECT and raw relay share this path)."""
+        peer = "%s:%d" % client.getpeername()[:2]
         up.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
             first = peek_payload(client)
@@ -199,10 +225,21 @@ class Relay:
                     h = hostname_of(first)
                     if h:
                         self._bump("tls_sni:" + h)
+                        self.log("[conn] %s -> %s (tls, %dB first payload, strategy=%s)"
+                                 % (peer, h, len(data), self.cfg.get("strategy")))
+                    else:
+                        self.log("[conn] %s -> tls first payload %dB (strategy=%s)"
+                                 % (peer, len(data), self.cfg.get("strategy")))
+                else:
+                    self.log("[conn] %s -> raw %dB first payload (strategy=%s)"
+                             % (peer, len(data), self.cfg.get("strategy")))
+            else:
+                self.log("[conn] %s -> connected, no first payload" % peer)
             t = threading.Thread(target=self.pipe, args=(up, client), daemon=True)
             t.start()
             self.pipe(client, up)
             t.join(timeout=60)
+            self.log("[done] %s closed" % peer)
         finally:
             up.close()
 
@@ -229,11 +266,15 @@ class ProxyServer:
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._srv.bind((host, port))
         self._srv.listen(128)
-        self.log("sni-shatter listening on %s:%d  (strategy=%s)"
-                 % (host, port, self.cfg.get("strategy", "combined")))
+        mode = ("relay -> %s:%s" % (self.cfg["connect_ip"], self.cfg.get("connect_port", 443))
+                if self.cfg.get("connect_ip") else "local proxy (HTTP CONNECT + SOCKS5)")
+        self.log("sni-shatter listening on %s:%d  [%s]  strategy=%s"
+                 % (host, self._srv.getsockname()[1], mode,
+                    self.cfg.get("strategy", "combined")))
         return self
 
     def serve_forever(self):
+        self.cfg["_log"] = self.log
         relay = Relay(self.cfg, self.stats)
         while not self._stop.is_set():
             try:

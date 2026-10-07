@@ -1,0 +1,14 @@
+{
+  "listen_host": "127.0.0.1",
+  "listen_port": 40443,
+  "strategy": "combined",
+  "split_positions": [
+    "sni+1"
+  ],
+  "segment_size": 2,
+  "tlsrec_size": 5,
+  "split_delay": 0.0,
+  "block_quic_hint": true,
+  "connect_ip": "172.66.158.77",
+  "connect_port": 443
+}

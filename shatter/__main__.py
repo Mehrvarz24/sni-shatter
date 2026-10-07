@@ -127,6 +127,9 @@ def main(argv=None):
     ap.add_argument("-c", "--config", help="path to config.json")
     ap.add_argument("--port", type=int, help="listen port (default 40443)")
     ap.add_argument("--strategy", help="split|segment|tlsrec|combined|httptamper|none")
+    ap.add_argument("--connect-ip", help="raw relay mode: forward every connection to this "
+                    "IP (e.g. a Cloudflare edge IP) — point a VLESS/VMess client at 127.0.0.1:port")
+    ap.add_argument("--connect-port", type=int, default=443, help="relay target port (default 443)")
     ap.add_argument("--check", nargs="?", const="cloudflare.com", metavar="HOST",
                     help="test all strategies against HOST and exit")
     ap.add_argument("--verbose", action="store_true", default=True)
@@ -137,6 +140,9 @@ def main(argv=None):
         cfg["listen_port"] = args.port
     if args.strategy:
         cfg["strategy"] = args.strategy
+    if args.connect_ip:
+        cfg["connect_ip"] = args.connect_ip
+        cfg["connect_port"] = args.connect_port
 
     if args.check:
         print("sni-shatter --check  target=%s" % args.check)
