@@ -56,6 +56,26 @@ def load_config(path):
 
 # ------------------------------------------------------------ self-test -------
 
+def _get_hello(host):
+    """A ClientHello the target will accept: captured from this machine's real
+    TLS stack, falling back to the built one only if capture fails."""
+    from .capture import capture_client_hello
+    hello = capture_client_hello(host)
+    if hello and hostname_of(hello) == host:
+        return hello
+    # fall back to a captured file if present (some minimal environments)
+    for cand in (os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "tests", "real_clienthello.bin"),):
+        try:
+            data = open(cand, "rb").read()
+            if hostname_of(data) == host:
+                return data
+        except OSError:
+            pass
+    from .clienthello import build_client_hello
+    return build_client_hello(host)
+
+
 def _fetch_via_proxy(proxy, host, timeout=8.0):
     """CONNECT to host:443 through the proxy and return the first TLS reply."""
     s = socket.create_connection(proxy, timeout=timeout)
@@ -64,17 +84,7 @@ def _fetch_via_proxy(proxy, host, timeout=8.0):
     if b"200" not in head.split(b"\r\n", 1)[0]:
         s.close()
         return b""
-    # send a ClientHello captured from the real TLS stack
-    try:
-        hello = open("/opt/sni-shatter/tests/real_clienthello.bin", "rb").read()
-        o = hostname_of(hello)
-        if o != host:
-            hello = None
-    except OSError:
-        hello = None
-    if hello is None:
-        from .clienthello import build_client_hello
-        hello = build_client_hello(host)
+    hello = _get_hello(host)
     s.sendall(hello)
     s.settimeout(timeout)
     try:
