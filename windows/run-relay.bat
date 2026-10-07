@@ -1,22 +1,19 @@
 @echo off
 chcp 65001 >nul
-title sni-shatter
+title sni-shatter (relay mode)
 pushd "%~dp0\.."
 
 where python >nul 2>nul
 if errorlevel 1 goto nopython
 
 echo ============================================
-echo   sni-shatter - DPI desync proxy
-echo   Listens on 127.0.0.1:40443   (HTTP + SOCKS5)
-echo   No admin rights needed.
+echo   sni-shatter - RELAY MODE
+echo   Forwards everything to the CDN edge IP in config.relay.json
+echo   Point your v2rayN config address at 127.0.0.1 : 40443
 echo ============================================
 echo.
-echo Set your browser/app proxy to  127.0.0.1 : 40443
-echo Press Ctrl+C to stop.
-echo.
 
-python -m shatter %*
+python -m shatter -c config.relay.json %*
 goto end
 
 :nopython
