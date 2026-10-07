@@ -1,25 +1,47 @@
 @echo off
 chcp 65001 >nul
-title sni-shatter - install service
 pushd "%~dp0\.."
 
-for /f "delims=" %%P in ('where python') do set "PYEXE=%%P"
-if not defined PYEXE goto nopython
+set "PY="
+where py >nul 2>nul
+if not errorlevel 1 set "PY=py -3"
+if defined PY goto havepy
+where python >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if defined PY goto havepy
+if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" set "PY=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+if defined PY goto havepy
+if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set "PY=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+if defined PY goto havepy
+if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set "PY=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+if defined PY goto havepy
+if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.exe" set "PY=%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
+if defined PY goto havepy
+if exist "C:\Python313\python.exe" set "PY=C:\Python313\python.exe"
+if defined PY goto havepy
+if exist "C:\Python312\python.exe" set "PY=C:\Python312\python.exe"
+if defined PY goto havepy
+if exist "C:\Python311\python.exe" set "PY=C:\Python311\python.exe"
+if defined PY goto havepy
+if exist "C:\Python310\python.exe" set "PY=C:\Python310\python.exe"
+if defined PY goto havepy
+goto nopython
 
-echo Installing sni-shatter as a Windows service (starts automatically at boot)...
+:havepy
+
 sc stop snishatter >nul 2>nul
 sc delete snishatter >nul 2>nul
-sc create snishatter binPath= "\"%PYEXE%\" \"%~dp0service_launcher.py\"" start= auto DisplayName= "sni-shatter proxy"
+sc create snishatter binPath= "\"%PY%\" \"%~dp0service_launcher.py\"" start= auto DisplayName= "sni-shatter proxy"
 sc description snishatter "Local DPI-desync proxy (HTTP+SOCKS5 on 127.0.0.1:40443)"
 sc failure snishatter reset= 0 actions= restart/60000
 net start snishatter
 echo.
-echo Done. Your browser proxy is 127.0.0.1:40443
+echo Done. Browser proxy: 127.0.0.1:40443
 pause
 goto end
 
 :nopython
-echo Python not found. Install Python 3 first.
+echo Python 3 was not found. Run install-python.bat first.
 pause
 
 :end
