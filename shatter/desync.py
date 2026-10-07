@@ -170,6 +170,42 @@ class CombinedStrategy(Strategy):
         return sent
 
 
+class ChunkStrategy(Strategy):
+    """Fixed-size chunks (UAC-style full5/full10/full20/multi64).
+    Smashes the whole ClientHello into many tiny TCP segments."""
+    name = "chunk"
+    SIZES = {"chunk5": 5, "chunk10": 10, "chunk20": 20, "chunk64": 64}
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.size = self.SIZES.get(cfg.get("chunk_size", "chunk20"), 20)
+        self.delay = float(cfg.get("chunk_delay", 0.003))
+
+    def send(self, sock, data: bytes) -> int:
+        for i in range(0, len(data), self.size):
+            sock.sendall(data[i:i + self.size])
+            if self.delay:
+                time.sleep(self.delay)
+        return len(data)
+
+
+class SniCharsStrategy(Strategy):
+    """Send every SNI hostname byte in its own TCP segment."""
+    name = "snichars"
+
+    def send(self, sock, data: bytes) -> int:
+        off = find_sni_offsets(data)
+        s, e = off["sni_start"], off["sni_end"]
+        if s == e:
+            sock.sendall(data)
+            return len(data)
+        sock.sendall(data[:s])
+        for b in data[s:e]:
+            sock.sendall(bytes([b]))
+        sock.sendall(data[e:])
+        return len(data)
+
+
 class HttpTamperStrategy(Strategy):
     """Case-swap and space-insert the Host header of a plain HTTP request."""
     name = "httptamper"
@@ -241,6 +277,8 @@ STRATEGIES = {
     "combined": CombinedStrategy,
     "httptamper": HttpTamperStrategy,
     "fakepkt": FakePacketStrategy,
+    "chunk": ChunkStrategy,
+    "snichars": SniCharsStrategy,
     "none": Strategy,
 }
 
