@@ -246,7 +246,8 @@ class Relay:
     def _connect_and_relay(self, client, target):
         try:
             up = socket.create_connection(target, timeout=10)
-        except OSError:
+        except OSError as exc:
+            self.log("[fail] %s:%d -> %s" % (target[0], target[1], exc))
             return
         self._relay_established(client, up)
 
